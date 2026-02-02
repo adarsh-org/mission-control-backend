@@ -43,19 +43,35 @@ fastify.get('/api/tasks', async (request, reply) => {
   return rows;
 });
 
+// GET /api/stats - Dashboard stats
+fastify.get('/api/stats', async (request, reply) => {
+  const { rows: agentStats } = await pool.query(
+    "SELECT COUNT(*) FROM agents WHERE status = 'working'"
+  );
+  
+  const { rows: taskStats } = await pool.query(
+    "SELECT COUNT(*) FROM tasks WHERE status IN ('backlog', 'todo')"
+  );
+
+  return {
+    activeAgents: parseInt(agentStats[0].count),
+    tasksInQueue: parseInt(taskStats[0].count)
+  };
+});
+
 // POST /api/tasks - Create a task
 fastify.post('/api/tasks', async (request, reply) => {
-  const { title, description, status = 'backlog', agent_id } = request.body;
+  const { title, description, status = 'backlog', tags = [], agent_id } = request.body;
   
   if (!title) {
     return reply.status(400).send({ error: 'Title is required' });
   }
 
   const { rows } = await pool.query(
-    `INSERT INTO tasks (title, description, status, agent_id) 
-     VALUES ($1, $2, $3, $4) 
+    `INSERT INTO tasks (title, description, status, tags, agent_id) 
+     VALUES ($1, $2, $3, $4, $5) 
      RETURNING *`,
-    [title, description || null, status, agent_id || null]
+    [title, description || null, status, tags, agent_id || null]
   );
 
   const task = rows[0];
@@ -66,18 +82,19 @@ fastify.post('/api/tasks', async (request, reply) => {
 // PUT /api/tasks/:id - Update a task
 fastify.put('/api/tasks/:id', async (request, reply) => {
   const { id } = request.params;
-  const { title, description, status, agent_id } = request.body;
+  const { title, description, status, tags, agent_id } = request.body;
 
   const { rows } = await pool.query(
     `UPDATE tasks 
      SET title = COALESCE($1, title),
          description = COALESCE($2, description),
          status = COALESCE($3, status),
-         agent_id = COALESCE($4, agent_id),
+         tags = COALESCE($4, tags),
+         agent_id = COALESCE($5, agent_id),
          updated_at = NOW()
-     WHERE id = $5
+     WHERE id = $6
      RETURNING *`,
-    [title, description, status, agent_id, id]
+    [title, description, status, tags, agent_id, id]
   );
 
   if (rows.length === 0) {
@@ -109,7 +126,8 @@ fastify.delete('/api/tasks/:id', async (request, reply) => {
 // Status progression map
 const STATUS_PROGRESSION = {
   'backlog': 'todo',
-  'todo': 'review',
+  'todo': 'in_progress',
+  'in_progress': 'review',
   'review': 'completed',
   'completed': null // Already at the end
 };
@@ -193,17 +211,17 @@ fastify.get('/api/agents', async (request, reply) => {
 
 // POST /api/agents - Create an agent
 fastify.post('/api/agents', async (request, reply) => {
-  const { name, description, status = 'idle' } = request.body;
+  const { name, description, role = 'Agent', status = 'idle' } = request.body;
 
   if (!name) {
     return reply.status(400).send({ error: 'Name is required' });
   }
 
   const { rows } = await pool.query(
-    `INSERT INTO agents (name, description, status) 
-     VALUES ($1, $2, $3) 
+    `INSERT INTO agents (name, description, role, status) 
+     VALUES ($1, $2, $3, $4) 
      RETURNING *`,
-    [name, description || null, status]
+    [name, description || null, role, status]
   );
 
   const agent = rows[0];
@@ -214,16 +232,17 @@ fastify.post('/api/agents', async (request, reply) => {
 // PUT /api/agents/:id - Update an agent
 fastify.put('/api/agents/:id', async (request, reply) => {
   const { id } = request.params;
-  const { name, description, status } = request.body;
+  const { name, description, role, status } = request.body;
 
   const { rows } = await pool.query(
     `UPDATE agents 
      SET name = COALESCE($1, name),
          description = COALESCE($2, description),
-         status = COALESCE($3, status)
-     WHERE id = $4
+         role = COALESCE($3, role),
+         status = COALESCE($4, status)
+     WHERE id = $5
      RETURNING *`,
-    [name, description, status, id]
+    [name, description, role, status, id]
   );
 
   if (rows.length === 0) {
@@ -286,6 +305,7 @@ fastify.get('/api/board', async (request, reply) => {
   const columns = [
     { title: 'Backlog', status: 'backlog', cards: [] },
     { title: 'To Do', status: 'todo', cards: [] },
+    { title: 'In Progress', status: 'in_progress', cards: [] },
     { title: 'In Review', status: 'review', cards: [] },
     { title: 'Completed', status: 'completed', cards: [] }
   ];
