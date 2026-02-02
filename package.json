@@ -1,11 +1,12 @@
 {
   "name": "mission-control-backend",
-  "version": "1.0.0",
-  "description": "Mission Control Backend - Real-time dashboard API",
+  "version": "2.0.0",
+  "description": "Mission Control Backend - PostgreSQL-backed API",
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
     "dev": "node src/index.js",
+    "migrate": "node src/migrate.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "engines": {
@@ -16,7 +17,7 @@
   "license": "ISC",
   "dependencies": {
     "@fastify/cors": "^11.2.0",
-    "chokidar": "^3.5.3",
-    "fastify": "^5.7.2"
+    "fastify": "^5.7.2",
+    "pg": "^8.11.3"
   }
 }
