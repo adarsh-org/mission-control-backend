@@ -106,6 +106,83 @@ fastify.delete('/api/tasks/:id', async (request, reply) => {
   return { success: true, deleted: rows[0] };
 });
 
+// Status progression map
+const STATUS_PROGRESSION = {
+  'backlog': 'todo',
+  'todo': 'review',
+  'review': 'completed',
+  'completed': null // Already at the end
+};
+
+// POST /api/tasks/:id/progress - Auto-progress task to next status
+fastify.post('/api/tasks/:id/progress', async (request, reply) => {
+  const { id } = request.params;
+
+  // Get current task
+  const { rows: current } = await pool.query(
+    'SELECT * FROM tasks WHERE id = $1',
+    [id]
+  );
+
+  if (current.length === 0) {
+    return reply.status(404).send({ error: 'Task not found' });
+  }
+
+  const task = current[0];
+  const nextStatus = STATUS_PROGRESSION[task.status];
+
+  if (!nextStatus) {
+    return reply.status(400).send({ 
+      error: 'Task already completed',
+      task 
+    });
+  }
+
+  // Update to next status
+  const { rows } = await pool.query(
+    `UPDATE tasks 
+     SET status = $1, updated_at = NOW()
+     WHERE id = $2
+     RETURNING *`,
+    [nextStatus, id]
+  );
+
+  const updatedTask = rows[0];
+  broadcast('task-updated', updatedTask);
+  
+  return {
+    success: true,
+    previousStatus: task.status,
+    newStatus: nextStatus,
+    task: updatedTask
+  };
+});
+
+// POST /api/tasks/:id/complete - Mark task as completed directly
+fastify.post('/api/tasks/:id/complete', async (request, reply) => {
+  const { id } = request.params;
+
+  const { rows } = await pool.query(
+    `UPDATE tasks 
+     SET status = 'completed', updated_at = NOW()
+     WHERE id = $1
+     RETURNING *`,
+    [id]
+  );
+
+  if (rows.length === 0) {
+    return reply.status(404).send({ error: 'Task not found' });
+  }
+
+  const task = rows[0];
+  broadcast('task-updated', task);
+  
+  return {
+    success: true,
+    task
+  };
+});
+
 // ============ AGENTS API ============
 
 // GET /api/agents - List all agents
@@ -231,8 +308,46 @@ fastify.get('/api/board', async (request, reply) => {
 
 // ============ SSE STREAM ============
 
+// Demo mode: randomly progress tasks
+async function simulateWorkProgress() {
+  try {
+    // Get all non-completed tasks
+    const { rows: tasks } = await pool.query(
+      "SELECT * FROM tasks WHERE status != 'completed' ORDER BY RANDOM() LIMIT 1"
+    );
+
+    if (tasks.length === 0) {
+      console.log('Demo: No tasks to progress');
+      return null;
+    }
+
+    const task = tasks[0];
+    const nextStatus = STATUS_PROGRESSION[task.status];
+
+    if (nextStatus) {
+      const { rows } = await pool.query(
+        `UPDATE tasks 
+         SET status = $1, updated_at = NOW()
+         WHERE id = $2
+         RETURNING *`,
+        [nextStatus, task.id]
+      );
+
+      const updatedTask = rows[0];
+      broadcast('task-updated', updatedTask);
+      console.log(`Demo: Task "${task.title}" progressed: ${task.status} → ${nextStatus}`);
+      return updatedTask;
+    }
+  } catch (err) {
+    console.error('Demo simulation error:', err);
+  }
+  return null;
+}
+
 // SSE Endpoint for real-time updates
 fastify.get('/api/stream', (req, res) => {
+  const demoMode = req.query.demo === 'true';
+  
   res.raw.writeHead(200, {
     'Content-Type': 'text/event-stream',
     'Cache-Control': 'no-cache',
@@ -241,7 +356,7 @@ fastify.get('/api/stream', (req, res) => {
   });
 
   clients.push(res.raw);
-  console.log(`Client connected. Total: ${clients.length}`);
+  console.log(`Client connected${demoMode ? ' (DEMO MODE)' : ''}. Total: ${clients.length}`);
 
   // Send initial data
   Promise.all([
@@ -250,7 +365,8 @@ fastify.get('/api/stream', (req, res) => {
   ]).then(([tasksResult, agentsResult]) => {
     res.raw.write(`event: init\ndata: ${JSON.stringify({
       tasks: tasksResult.rows,
-      agents: agentsResult.rows
+      agents: agentsResult.rows,
+      demoMode
     })}\n\n`);
   });
 
@@ -259,8 +375,26 @@ fastify.get('/api/stream', (req, res) => {
     res.raw.write(`:heartbeat\n\n`);
   }, 30000);
 
+  // Demo mode: simulate work by progressing random tasks every 3-8 seconds
+  let demoInterval = null;
+  if (demoMode) {
+    const runDemo = () => {
+      simulateWorkProgress();
+      // Random interval between 3-8 seconds for next progression
+      const nextInterval = Math.floor(Math.random() * 5000) + 3000;
+      demoInterval = setTimeout(runDemo, nextInterval);
+    };
+    // Start first demo tick after 2 seconds
+    demoInterval = setTimeout(runDemo, 2000);
+    res.raw.write(`event: demo-started\ndata: ${JSON.stringify({ message: 'Demo mode active - tasks will auto-progress' })}\n\n`);
+  }
+
   req.raw.on('close', () => {
     clearInterval(heartbeat);
+    if (demoInterval) {
+      clearTimeout(demoInterval);
+      console.log('Demo mode stopped');
+    }
     clients = clients.filter(c => c !== res.raw);
     console.log(`Client disconnected. Total: ${clients.length}`);
   });
