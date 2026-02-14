@@ -5,6 +5,38 @@ const pool = require('./db');
 // Store active SSE clients
 let clients = [];
 
+// Agent name to ID mapping for @mention parsing
+const AGENT_NAME_MAP = {
+  'goku': 1,
+  'vegeta': 2,
+  'piccolo': 3,
+  'gohan': 4,
+  'bulma': 5,
+  'trunks': 6,
+  'rob': 7,
+  'android18': 8
+};
+
+// Parse @mentions from message content
+function parseMentions(message) {
+  if (!message) return [];
+  
+  // Match @AgentName patterns (case-insensitive)
+  const mentionRegex = /@(\w+)/g;
+  const mentions = [];
+  let match;
+  
+  while ((match = mentionRegex.exec(message)) !== null) {
+    const name = match[1].toLowerCase();
+    const agentId = AGENT_NAME_MAP[name];
+    if (agentId && !mentions.includes(agentId)) {
+      mentions.push(agentId);
+    }
+  }
+  
+  return mentions;
+}
+
 // Register CORS
 fastify.register(cors, {
   origin: '*'
@@ -284,7 +316,41 @@ fastify.get('/api/messages', async (request, reply) => {
   query += ` ORDER BY m.created_at DESC LIMIT $${params.length - 1} OFFSET $${params.length}`;
 
   const { rows } = await pool.query(query, params);
-  return rows;
+  
+  // Add mentioned_agent_ids to each message
+  return rows.map(msg => ({
+    ...msg,
+    mentioned_agent_ids: parseMentions(msg.message)
+  }));
+});
+
+// GET /api/messages/mentions/:agent_id - Get messages where agent was mentioned
+fastify.get('/api/messages/mentions/:agent_id', async (request, reply) => {
+  const { agent_id } = request.params;
+  const { limit = 40, offset = 0 } = request.query;
+  
+  // Get all messages and filter by mentions (since mentions are computed, not stored)
+  const { rows } = await pool.query(
+    `SELECT m.*, a.name as agent_name 
+     FROM agent_messages m 
+     LEFT JOIN agents a ON m.agent_id = a.id 
+     ORDER BY m.created_at DESC`
+  );
+  
+  const targetAgentId = parseInt(agent_id);
+  
+  // Filter messages that mention this agent
+  const mentionedMessages = rows
+    .map(msg => ({
+      ...msg,
+      mentioned_agent_ids: parseMentions(msg.message)
+    }))
+    .filter(msg => msg.mentioned_agent_ids.includes(targetAgentId));
+  
+  // Apply pagination
+  const paginated = mentionedMessages.slice(parseInt(offset), parseInt(offset) + parseInt(limit));
+  
+  return paginated;
 });
 
 // POST /api/messages - Create a message
@@ -303,8 +369,28 @@ fastify.post('/api/messages', async (request, reply) => {
   );
 
   const msg = rows[0];
-  broadcast('message-created', msg);
-  return reply.status(201).send(msg);
+  
+  // Parse mentions and add to response
+  const mentionedAgentIds = parseMentions(message);
+  const msgWithMentions = {
+    ...msg,
+    mentioned_agent_ids: mentionedAgentIds
+  };
+  
+  broadcast('message-created', msgWithMentions);
+  
+  // Broadcast agent-mentioned event for each mentioned agent
+  mentionedAgentIds.forEach(mentionedId => {
+    broadcast('agent-mentioned', {
+      message_id: msg.id,
+      mentioned_agent_id: mentionedId,
+      by_agent_id: agent_id || null,
+      message: msg.message,
+      created_at: msg.created_at
+    });
+  });
+  
+  return reply.status(201).send(msgWithMentions);
 });
 
 // ============ BOARD API (for backward compatibility) ============
