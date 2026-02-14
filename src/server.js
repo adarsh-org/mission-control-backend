@@ -256,9 +256,9 @@ fastify.put('/api/agents/:id', async (request, reply) => {
 
 // ============ MESSAGES API ============
 
-// GET /api/messages - List messages (with optional agent_id filter)
+// GET /api/messages - List messages (with optional agent_id filter and pagination)
 fastify.get('/api/messages', async (request, reply) => {
-  const { agent_id, limit = 50 } = request.query;
+  const { agent_id, limit = 40, offset = 0 } = request.query;
   
   let query = 'SELECT m.*, a.name as agent_name FROM agent_messages m LEFT JOIN agents a ON m.agent_id = a.id';
   const params = [];
@@ -269,7 +269,8 @@ fastify.get('/api/messages', async (request, reply) => {
   }
   
   params.push(parseInt(limit));
-  query += ` ORDER BY m.created_at DESC LIMIT $${params.length}`;
+  params.push(parseInt(offset));
+  query += ` ORDER BY m.created_at DESC LIMIT $${params.length - 1} OFFSET $${params.length}`;
 
   const { rows } = await pool.query(query, params);
   return rows;
