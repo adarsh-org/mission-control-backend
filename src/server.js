@@ -18,9 +18,9 @@ function broadcast(event, data) {
 
 // ============ TASKS API ============
 
-// GET /api/tasks - List all tasks
+// GET /api/tasks - List all tasks (supports limit/offset for pagination)
 fastify.get('/api/tasks', async (request, reply) => {
-  const { status, agent_id } = request.query;
+  const { status, agent_id, limit, offset } = request.query;
   let query = 'SELECT * FROM tasks';
   const params = [];
   const conditions = [];
@@ -38,6 +38,17 @@ fastify.get('/api/tasks', async (request, reply) => {
     query += ' WHERE ' + conditions.join(' AND ');
   }
   query += ' ORDER BY created_at DESC';
+
+  // Add pagination if limit is provided
+  if (limit) {
+    params.push(parseInt(limit));
+    query += ` LIMIT $${params.length}`;
+    
+    if (offset) {
+      params.push(parseInt(offset));
+      query += ` OFFSET $${params.length}`;
+    }
+  }
 
   const { rows } = await pool.query(query, params);
   return rows;
