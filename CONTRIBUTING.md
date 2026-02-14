@@ -28,10 +28,17 @@ Example:
 Internal (mission-control-*) → Test → PR to Public (claw-control)
 ```
 
-## 🚨 If You Skip the Workflow:
+## 🚨 If You Skip the Workflow (Orphan Work Protocol):
 1. STOP and create a task retroactively
-2. Link it to your commit
-3. Don't let it slide!
+2. Link it to your commit with a comment
+3. Mark task as completed
+4. Don't let it slide!
+
+### Self-Check Before Any PR:
+- "Is this task on the board?"
+- "Did I spawn an agent or am I doing it myself?"
+- "Does my commit have `[#TASK_ID]` in the message?"
+- "Did I test in internal before touching public?"
 
 ---
 
