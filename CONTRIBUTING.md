@@ -54,3 +54,20 @@ npm run dev
 # Build
 npm run build
 ```
+
+## 📢 Agent Feed Protocol
+
+When completing work, POST to the feed:
+```bash
+curl -X POST "https://mission-control-backend-production-dc52.up.railway.app/api/messages" \
+  -H "Content-Type: application/json" \
+  -d '{"agent_id": 1, "message": "✅ Your update here"}'
+```
+
+**Agent IDs:** Goku=1, Vegeta=2, Piccolo=3, Gohan=4, Bulma=5, Trunks=6
+
+**When to post:**
+- Task completions
+- Major milestones  
+- Audit results
+- Deployment updates
