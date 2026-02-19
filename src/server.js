@@ -317,61 +317,59 @@ fastify.get('/api/messages', async (request, reply) => {
 
   const { rows } = await pool.query(query, params);
   
-  // Add mentioned_agent_ids to each message
+  // Backfill mentioned_agent_ids for messages that don't have it stored yet
   return rows.map(msg => ({
     ...msg,
-    mentioned_agent_ids: parseMentions(msg.message)
+    mentioned_agent_ids: msg.mentioned_agent_ids && msg.mentioned_agent_ids.length > 0 
+      ? msg.mentioned_agent_ids 
+      : parseMentions(msg.message)
   }));
 });
 
 // GET /api/messages/mentions/:agent_id - Get messages where agent was mentioned
 fastify.get('/api/messages/mentions/:agent_id', async (request, reply) => {
   const { agent_id } = request.params;
-  const { limit = 40, offset = 0 } = request.query;
-  
-  // Get all messages and filter by mentions (since mentions are computed, not stored)
-  const { rows } = await pool.query(
-    `SELECT m.*, a.name as agent_name 
-     FROM agent_messages m 
-     LEFT JOIN agents a ON m.agent_id = a.id 
-     ORDER BY m.created_at DESC`
-  );
-  
+  const { limit = 40, since } = request.query;
   const targetAgentId = parseInt(agent_id);
   
-  // Filter messages that mention this agent
-  const mentionedMessages = rows
-    .map(msg => ({
-      ...msg,
-      mentioned_agent_ids: parseMentions(msg.message)
-    }))
-    .filter(msg => msg.mentioned_agent_ids.includes(targetAgentId));
+  let query = `SELECT m.*, a.name as agent_name 
+     FROM agent_messages m 
+     LEFT JOIN agents a ON m.agent_id = a.id 
+     WHERE $1 = ANY(m.mentioned_agent_ids)`;
+  const params = [targetAgentId];
   
-  // Apply pagination
-  const paginated = mentionedMessages.slice(parseInt(offset), parseInt(offset) + parseInt(limit));
+  if (since) {
+    params.push(since);
+    query += ` AND m.created_at > $${params.length}`;
+  }
   
-  return paginated;
+  params.push(parseInt(limit));
+  query += ` ORDER BY m.created_at DESC LIMIT $${params.length}`;
+
+  const { rows } = await pool.query(query, params);
+  return rows;
 });
 
 // POST /api/messages - Create a message
 fastify.post('/api/messages', async (request, reply) => {
-  const { agent_id, message } = request.body;
+  const { agent_id, message: msg_body, content } = request.body;
+  const message = msg_body || content;
 
   if (!message) {
     return reply.status(400).send({ error: 'Message is required' });
   }
 
+  // Parse mentions and store in DB
+  const mentionedAgentIds = parseMentions(message);
+
   const { rows } = await pool.query(
-    `INSERT INTO agent_messages (agent_id, message) 
-     VALUES ($1, $2) 
+    `INSERT INTO agent_messages (agent_id, message, mentioned_agent_ids) 
+     VALUES ($1, $2, $3) 
      RETURNING *`,
-    [agent_id || null, message]
+    [agent_id || null, message, mentionedAgentIds]
   );
 
   const msg = rows[0];
-  
-  // Parse mentions and add to response
-  const mentionedAgentIds = parseMentions(message);
   const msgWithMentions = {
     ...msg,
     mentioned_agent_ids: mentionedAgentIds

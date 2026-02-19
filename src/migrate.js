@@ -52,6 +52,10 @@ BEGIN
         ALTER TABLE tasks ADD COLUMN tags TEXT[] DEFAULT '{}'; 
     END IF; 
 END $$;
+
+-- Add mentioned_agent_ids column to agent_messages if missing
+ALTER TABLE agent_messages ADD COLUMN IF NOT EXISTS mentioned_agent_ids INTEGER[] DEFAULT '{}';
+CREATE INDEX IF NOT EXISTS idx_messages_mentioned ON agent_messages USING GIN(mentioned_agent_ids);
 `;
 
 async function migrate() {
