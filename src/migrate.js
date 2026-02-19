@@ -56,6 +56,15 @@ END $$;
 -- Add mentioned_agent_ids column to agent_messages if missing
 ALTER TABLE agent_messages ADD COLUMN IF NOT EXISTS mentioned_agent_ids INTEGER[] DEFAULT '{}';
 CREATE INDEX IF NOT EXISTS idx_messages_mentioned ON agent_messages USING GIN(mentioned_agent_ids);
+
+-- Add agent profile fields
+ALTER TABLE agents ADD COLUMN IF NOT EXISTS bio TEXT;
+ALTER TABLE agents ADD COLUMN IF NOT EXISTS principles TEXT[] DEFAULT '{}';
+ALTER TABLE agents ADD COLUMN IF NOT EXISTS critical_actions TEXT[] DEFAULT '{}';
+ALTER TABLE agents ADD COLUMN IF NOT EXISTS communication_style TEXT;
+ALTER TABLE agents ADD COLUMN IF NOT EXISTS does TEXT[] DEFAULT '{}';
+ALTER TABLE agents ADD COLUMN IF NOT EXISTS does_not TEXT[] DEFAULT '{}';
+ALTER TABLE agents ADD COLUMN IF NOT EXISTS bmad_source TEXT;
 `;
 
 async function migrate() {

@@ -272,20 +272,37 @@ fastify.post('/api/agents', async (request, reply) => {
   return reply.status(201).send(agent);
 });
 
+// GET /api/agents/:id - Get single agent with all fields
+fastify.get('/api/agents/:id', async (request, reply) => {
+  const { id } = request.params;
+  const { rows } = await pool.query('SELECT * FROM agents WHERE id = $1', [id]);
+  if (rows.length === 0) {
+    return reply.status(404).send({ error: 'Agent not found' });
+  }
+  return rows[0];
+});
+
 // PUT /api/agents/:id - Update an agent
 fastify.put('/api/agents/:id', async (request, reply) => {
   const { id } = request.params;
-  const { name, description, role, status } = request.body;
+  const { name, description, role, status, bio, principles, critical_actions, communication_style, does: agentDoes, does_not, bmad_source } = request.body;
 
   const { rows } = await pool.query(
     `UPDATE agents 
      SET name = COALESCE($1, name),
          description = COALESCE($2, description),
          role = COALESCE($3, role),
-         status = COALESCE($4, status)
-     WHERE id = $5
+         status = COALESCE($4, status),
+         bio = COALESCE($5, bio),
+         principles = COALESCE($6, principles),
+         critical_actions = COALESCE($7, critical_actions),
+         communication_style = COALESCE($8, communication_style),
+         does = COALESCE($9, does),
+         does_not = COALESCE($10, does_not),
+         bmad_source = COALESCE($11, bmad_source)
+     WHERE id = $12
      RETURNING *`,
-    [name, description, role, status, id]
+    [name, description, role, status, bio, principles, critical_actions, communication_style, agentDoes, does_not, bmad_source, id]
   );
 
   if (rows.length === 0) {
