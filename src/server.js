@@ -370,8 +370,17 @@ fastify.post('/api/messages', async (request, reply) => {
   );
 
   const msg = rows[0];
+  let agentName = null;
+  if (agent_id) {
+    const agentResult = await pool.query('SELECT name FROM agents WHERE id = $1', [agent_id]);
+    if (agentResult.rows.length > 0) {
+      agentName = agentResult.rows[0].name;
+    }
+  }
+
   const msgWithMentions = {
     ...msg,
+    agent_name: agentName,
     mentioned_agent_ids: mentionedAgentIds
   };
   
